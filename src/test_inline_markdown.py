@@ -16,7 +16,8 @@ from inline_markdown import (
     markdown_to_blocks, 
     block_to_block_type, 
     text_to_children, 
-    markdown_to_html_node
+    markdown_to_html_node,
+    extract_title
 )
 
 
@@ -501,6 +502,23 @@ This is a code block
         self.assertEqual(html_node.children[4].tag, "ol")
         self.assertEqual(html_node.children[5].tag, "blockquote")
         self.assertEqual(html_node.children[6].tag, "pre")
+
+    def test_extract_title_valid(self):
+        markdown = "# Hello\nThis is some content"
+        self.assertEqual(extract_title(markdown), "Hello")
+
+    def test_extract_title_with_spaces(self):
+        markdown = "#    Title with spaces    \nContent"
+        self.assertEqual(extract_title(markdown), "Title with spaces")
+
+    def test_extract_title_no_h1(self):
+        markdown = "## Secondary header\nContent"
+        with self.assertRaises(ValueError):
+            extract_title(markdown)
+
+    def test_extract_title_empty_string(self):
+        with self.assertRaises(ValueError):
+            extract_title("")        
 
 if __name__ == "__main__":
     unittest.main()

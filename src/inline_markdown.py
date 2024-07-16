@@ -2,17 +2,19 @@ import re
 from htmlnode import HTMLNode
 from textnode import TextNode, text_type_text, text_type_bold, text_type_italic, text_type_code, text_type_image, text_type_link
 
+block_type_paragraph = "paragraph"
+block_type_heading = "heading"
+block_type_code = "code"
+block_type_quote = "quote"
+block_type_olist = "ordered_list"
+block_type_ulist = "unordered_list"
+
 def split_nodes_delimiter(old_nodes, delimiter, text_type):
     new_nodes = []
     for old_node in old_nodes:
         if old_node.text_type != text_type_text:
             new_nodes.append(old_node)
             continue
-        
-        if not old_node.text:
-            new_nodes.append(TextNode("", text_type_text))
-            continue
-        
         sections = old_node.text.split(delimiter)
         current_type = text_type_text
         for i, section in enumerate(sections):
@@ -20,8 +22,8 @@ def split_nodes_delimiter(old_nodes, delimiter, text_type):
                 new_nodes.append(TextNode(section, current_type))
             if i < len(sections) - 1:
                 current_type = text_type if current_type == text_type_text else text_type_text
-    
     return new_nodes
+
 
 def split_nodes(old_nodes, delimiter, text_type):
     return split_nodes_delimiter(old_nodes, delimiter, text_type)
@@ -104,51 +106,60 @@ def markdown_to_blocks(markdown):
     
     return cleaned_blocks
 
+
 def block_to_block_type(block):
-    # Check for empty block
-    if not block:
-        return "paragraph"
-    
-    # Check for heading
-    if re.match(r'^#{1,6}\s', block):
-        return "heading"
-    
-    # Check for code block
-    if block.startswith("```") and block.endswith("```"):
-        return "code"
-    
-    # Check for quote
-    if all(line.strip().startswith(">") for line in block.split("\n") if line.strip()):
-        return "quote"
-    
-    # Check for unordered list
-    if all(line.strip().startswith(("*", "-")) for line in block.split("\n") if line.strip()):
-        return "unordered_list"
-    
-    # Check for ordered list
-    lines = [line.strip() for line in block.split("\n") if line.strip()]
-    if all(re.match(r'^\d+\.\s', line) for line in lines):
-        numbers = [int(line.split('.')[0]) for line in lines]
-        if numbers == list(range(1, len(numbers) + 1)):
-            return "ordered_list"
-    
-    # If none of the above conditions are met, it's a paragraph
-    return "paragraph"
+    lines = block.split("\n")
+
+    if (
+        block.startswith("# ")
+        or block.startswith("## ")
+        or block.startswith("### ")
+        or block.startswith("#### ")
+        or block.startswith("##### ")
+        or block.startswith("###### ")
+    ):
+        return block_type_heading
+    if len(lines) > 1 and lines[0].startswith("```") and lines[-1].startswith("```"):
+        return block_type_code
+    if block.startswith(">"):
+        for line in lines:
+            if not line.startswith(">"):
+                return block_type_paragraph
+        return block_type_quote
+    if block.startswith("* "):
+        for line in lines:
+            if not line.startswith("* "):
+                return block_type_paragraph
+        return block_type_ulist
+    if block.startswith("- "):
+        for line in lines:
+            if not line.startswith("- "):
+                return block_type_paragraph
+        return block_type_ulist
+    if block.startswith("1. "):
+        i = 1
+        for line in lines:
+            if not line.startswith(f"{i}. "):
+                return block_type_paragraph
+            i += 1
+        return block_type_olist
+    return block_type_paragraph
+
 def text_to_children(text):
     nodes = text_to_textnodes(text)
     children = []
     for node in nodes:
-        if node.text_type == "text":
+        if node.text_type == text_type_text:
             children.append(HTMLNode(None, node.text))
-        elif node.text_type == "bold":
-            children.append(HTMLNode("b", node.text))
-        elif node.text_type == "italic":
-            children.append(HTMLNode("i", node.text))
-        elif node.text_type == "code":
-            children.append(HTMLNode("code", node.text))
-        elif node.text_type == "link":
-            children.append(HTMLNode("a", node.text, None, {"href": node.url}))
-        elif node.text_type == "image":
+        elif node.text_type == text_type_bold:
+            children.append(HTMLNode("b", None, [HTMLNode(None, node.text)]))
+        elif node.text_type == text_type_italic:
+            children.append(HTMLNode("i", None, [HTMLNode(None, node.text)]))
+        elif node.text_type == text_type_code:
+            children.append(HTMLNode("code", None, [HTMLNode(None, node.text)]))
+        elif node.text_type == text_type_link:
+            children.append(HTMLNode("a", None, [HTMLNode(None, node.text)], {"href": node.url}))
+        elif node.text_type == text_type_image:
             children.append(HTMLNode("img", "", None, {"src": node.url, "alt": node.text}))
     return children
 
@@ -161,18 +172,27 @@ def markdown_to_html_node(markdown):
             children.append(HTMLNode("p", None, text_to_children(block)))
         elif block_type == "heading":
             level = len(block.split()[0])  # Count the number of '#' characters
-            children.append(HTMLNode(f"h{level}", None, text_to_children(block[level+1:])))
+            children.append(HTMLNode(f"h{level}", None, text_to_children(block[level+1:].strip())))
         elif block_type == "code":
             code_content = block.strip('`').strip()
-            children.append(HTMLNode("pre", None, [HTMLNode("code", None, text_to_children(code_content))]))
+            children.append(HTMLNode("pre", None, [HTMLNode("code", code_content)]))
         elif block_type == "quote":
             quote_content = '\n'.join(line.strip('> ').strip() for line in block.split('\n'))
             children.append(HTMLNode("blockquote", None, text_to_children(quote_content)))
         elif block_type == "unordered_list":
-            list_items = [HTMLNode("li", None, text_to_children(item.strip('* ').strip())) for item in block.split('\n')]
+            list_items = [HTMLNode("li", None, text_to_children(item.strip('* ').strip())) for item in block.split('\n') if item.strip()]
             children.append(HTMLNode("ul", None, list_items))
         elif block_type == "ordered_list":
-            list_items = [HTMLNode("li", None, text_to_children(item.split('. ', 1)[1].strip())) for item in block.split('\n')]
+            list_items = [HTMLNode("li", None, text_to_children(item.split('. ', 1)[1].strip())) for item in block.split('\n') if item.strip()]
             children.append(HTMLNode("ol", None, list_items))
+    
+    return HTMLNode("div", None, children)
+
+def extract_title(markdown):
+    lines = markdown.split('\n')
+    for line in lines:
+        if line.startswith('# '):
+            return line[2:].strip()
+    raise ValueError("No h1 header found in the markdown file")
     
     return HTMLNode("div", None, children)
